@@ -1,0 +1,23 @@
+# Python-generated files
+*/__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.python-version
+
+# Virtual environments
+project/.venv
+
+# local development
+project/data/HAM10000_images_part_*/
+wandb/
+wandb_plots/
+get_wandb_logs.py
+test*.py
+*sweep*
+uv.lock
+pyproject_*
+notebooks/
+project/api/debug_main.py/
