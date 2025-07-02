@@ -62,8 +62,7 @@ async def lifespan(app: FastAPI):
         download_blob(METADATA_CSV_FILENAME, f"/tmp/data/{METADATA_CSV_FILENAME}")
         download_blob(IMAGE_MANIFEST_FILENAME, f"/tmp/data/{IMAGE_MANIFEST_FILENAME}")
         download_blob(TEST_SET_CSV_FILENAME, f"/tmp/data/{TEST_SET_CSV_FILENAME}")
-        # download_blob(MODEL_FILENAME, "/tmp/model.pth")
-        print("Skipping model download for debugging.")
+        download_blob(MODEL_FILENAME, "/tmp/model.pth")
         
         print("Step 2: Loading resources from downloaded files...")
         df_metadata = pd.read_csv(f"/tmp/data/{METADATA_CSV_FILENAME}")
@@ -74,26 +73,20 @@ async def lifespan(app: FastAPI):
         app.state.class_names = class_names
         print("Class names loaded successfully.")
         
-        # --- DEBUGGING STEP: Use a placeholder for the model ---
-        print("Using placeholder for model to isolate resource issues.")
-        app.state.model = "placeholder" # Set a non-None placeholder
-        print("Model setup complete (using placeholder).")
+        new_head = nn.Sequential(
+            nn.Linear(2048, 512),
+            nn.ReLU(),
+            nn.Dropout(p=0.36057091203514374),
+            nn.Linear(512, len(app.state.class_names)),
+        )
+        model = get_model(name="resnet50", new_head=new_head)
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        print("Successfuly loaded model from artifact")
+        model.to(device)
+        model.eval()
+        app.state.model = model
+        print(f"Model loaded successfully and is running on {device}.")
         app.state.is_ready = True
-        
-        # new_head = nn.Sequential(
-        #     nn.Linear(2048, 512),
-        #     nn.ReLU(),
-        #     nn.Dropout(p=0.36057091203514374),
-        #     nn.Linear(512, len(app.state.class_names)),
-        # )
-        # model = get_model(name="resnet50", new_head=new_head)
-        # model.load_state_dict(torch.load(model_path, map_location=device))
-        # print("Successfuly loaded model from artifact")
-        # model.to(device)
-        # model.eval()
-        # app.state.model = model
-        # print(f"Model loaded successfully and is running on {device}.")
-        # app.state.is_ready = True
 
     except Exception as e:
         print(f"Application startup failed: Could not load resources. {e}")
@@ -155,8 +148,7 @@ async def predict(request: Request, file: UploadFile = File(...)):
     The main prediction endpoint. It uses the project's specific modules
     for model architecture and image preprocessing.
     """
-    # if not request.app.state.is_ready:
-    if not request.app.state.is_ready or request.app.state.model == "placeholder":
+    if not request.app.state.is_ready:
         raise HTTPException(status_code=503, detail="Service not ready. Check startup logs.")
     model = request.app.state.model
     class_names = request.app.state.class_names
