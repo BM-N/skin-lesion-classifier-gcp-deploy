@@ -68,7 +68,9 @@ async def lifespan(app: FastAPI):
         app.state.manifest = manifest_df
         app.state.test_set_df = pd.read_csv(f"/tmp/data/{TEST_SET_CSV_FILENAME}")
         
-        _, _, class_names = get_loss_class_weights(f"/tmp/data/{METADATA_CSV_FILENAME}")
+        # _, _, class_names = get_loss_class_weights(f"/tmp/data/{METADATA_CSV_FILENAME}")
+        # app.state.class_names = class_names
+        class_names = sorted(df_metadata['dx'].unique())
         app.state.class_names = class_names
         print("Class names loaded successfully.")
         
@@ -79,7 +81,7 @@ async def lifespan(app: FastAPI):
             nn.Linear(512, len(app.state.class_names)),
         )
         model = get_model(name="resnet50", new_head=new_head)
-        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.load_state_dict(torch.load("/tmp/data/model.pth", map_location=device))
         print("Successfuly loaded model from artifact")
         model.to(device)
         model.eval()
