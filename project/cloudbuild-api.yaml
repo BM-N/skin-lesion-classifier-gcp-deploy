@@ -3,11 +3,11 @@ steps:
   args:
     - 'build'
     - '-t'
-    - 'us-central1-docker.pkg.dev/$PROJECT_ID/skin-lesion-repo/api:latest'
+    - 'us-central1-docker.pkg.dev/$PROJECT_ID/skin-lesion-artifact-repo/api:latest'
     - '.'
     - '-f'
     - 'project/api/Dockerfile'
 images:
-- 'us-central1-docker.pkg.dev/$PROJECT_ID/skin-lesion-repo/api:latest'
+- 'us-central1-docker.pkg.dev/$PROJECT_ID/skin-lesion-artifact-repo/api:latest'
 options:
   logging: CLOUD_LOGGING_ONLY
