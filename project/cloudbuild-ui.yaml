@@ -1,0 +1,11 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+    - 'build'
+    - '-t'
+    - 'us-central1-docker.pkg.dev/$PROJECT_ID/skin-lesion-repo/ui:latest'
+    - '.'
+    - '-f'
+    - 'project/ui/Dockerfile'
+images:
+- 'us-central1-docker.pkg.dev/$PROJECT_ID/skin-lesion-repo/ui:latest'
