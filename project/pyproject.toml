@@ -19,6 +19,7 @@ api = [
     "uvicorn[standard]>=0.34.3",
     "python-multipart>=0.0.20",
     "gunicorn>=22.0.0",
+    "google-cloud-storage>=3.1.1",
 ]
 
 ui = [
@@ -37,7 +38,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["api", "models", "trainer", "utils", "data"]
+packages = ["api", "ui", "models", "data"]
 
 [dependency-groups]
 dev = [
