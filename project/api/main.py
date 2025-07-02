@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
         app.state.manifest = manifest_df
         app.state.test_set_df = pd.read_csv(f"/tmp/data/{TEST_SET_CSV_FILENAME}")
         
-        _, _, class_names = get_loss_class_weights(METADATA_CSV_FILENAME)
+        _, _, class_names = get_loss_class_weights(f"/tmp/data/{METADATA_CSV_FILENAME}")
         app.state.class_names = class_names
         print("Class names loaded successfully.")
         
