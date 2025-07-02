@@ -58,16 +58,16 @@ async def lifespan(app: FastAPI):
             blob.download_to_filename(destination_file_name)
             print(f"Downloaded {source_blob_name} to {destination_file_name}")
 
-        os.makedirs("/tmp/data", exist_ok=True)
-        download_blob(METADATA_CSV_FILENAME, f"/tmp/data/{METADATA_CSV_FILENAME}")
-        download_blob(IMAGE_MANIFEST_FILENAME, f"/tmp/data/{IMAGE_MANIFEST_FILENAME}")
-        download_blob(TEST_SET_CSV_FILENAME, f"/tmp/data/{TEST_SET_CSV_FILENAME}")
+        os.makedirs("/tmp", exist_ok=True)
+        download_blob(METADATA_CSV_FILENAME, f"/tmp/{METADATA_CSV_FILENAME}")
+        download_blob(IMAGE_MANIFEST_FILENAME, f"/tmp/{IMAGE_MANIFEST_FILENAME}")
+        download_blob(TEST_SET_CSV_FILENAME, f"/tmp/{TEST_SET_CSV_FILENAME}")
         download_blob(MODEL_FILENAME, "/tmp/model.pth")
         
         print("Step 2: Loading resources from downloaded files...")
-        df_metadata = pd.read_csv(f"/tmp/data/{METADATA_CSV_FILENAME}")
-        manifest_df = pd.read_csv(f"/tmp/data/{IMAGE_MANIFEST_FILENAME}").set_index('image_id')
-        app.state.test_set_df = pd.read_csv(f"/tmp/data/{TEST_SET_CSV_FILENAME}")
+        df_metadata = pd.read_csv(f"/tmp/{METADATA_CSV_FILENAME}")
+        manifest_df = pd.read_csv(f"/tmp/{IMAGE_MANIFEST_FILENAME}").set_index('image_id')
+        app.state.test_set_df = pd.read_csv(f"/tmp/{TEST_SET_CSV_FILENAME}")
         
         _, _, class_names = get_loss_class_weights(METADATA_CSV_FILENAME)
         app.state.class_names = class_names
