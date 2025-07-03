@@ -20,6 +20,9 @@ st.write(
 @st.cache_data(ttl=600)
 def get_test_image_data():
     """Fetches the list of test images and their data from the API."""
+    if not API_URL:
+        st.error("API_URL environment variable is not set.")
+        return None
     try:
         response = requests.get(f"{API_URL}/test-images")
         response.raise_for_status()
@@ -29,17 +32,29 @@ def get_test_image_data():
         return None
 
 
-def get_prediction(image_bytes):
-    """Sends an image to the API's /predict endpoint and gets the result."""
+def get_prediction_from_upload(image_bytes):
+    if not API_URL: return None
     try:
+        predict_url = f"{API_URL}/predict"
         files = {"file": ("image.jpg", image_bytes, "image/jpeg")}
-        response = requests.post(f"{API_URL}/predict", files=files)
+        response = requests.post(predict_url, files=files)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Prediction failed. Could not connect to the API: {e}")
         return None
 
+def get_prediction_from_url(image_url: str):
+    if not API_URL: return None
+    try:
+        predict_url = f"{API_URL}/predict-from-url"
+        payload = {"image_url": image_url}
+        response = requests.post(predict_url, json=payload)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Prediction failed: {e}")
+        return None
 
 # layout
 st.sidebar.title("Options")
@@ -55,10 +70,10 @@ if app_mode == "Upload your own image":
         image_bytes = uploaded_file.getvalue()
         col1, col2 = st.columns(2)
         with col1:
-            st.image(image_bytes, caption="Uploaded Image", use_container_width=True)
+            st.image(image_bytes, caption="Uploaded Image", use_column_width=True)
 
         with st.spinner("Sending to API for analysis..."):
-            result = get_prediction(image_bytes)
+            result = get_prediction_from_upload(image_bytes)
 
         with col2:
             if result:
@@ -102,34 +117,28 @@ else:
                 st.image(image_url, caption=f"Test Image: {selected_id}", use_column_width=True)
                 ground_truth = selected_row['dx_full']
                 st.info(f"**Ground Truth:** {ground_truth}")
-                try:
-                    image_response = requests.get(image_url)
-                    image_response.raise_for_status()
-                    image_bytes = image_response.content
+
+            with st.spinner("Analyzing the image..."):
+                result = get_prediction_from_url(image_url)
+            with col2:
+                if result:
+                    prediction = result["prediction"]
+                    if prediction == ground_truth:
+                        st.success(f"**Prediction:** {prediction} (Correct)")
+                    else:
+                        st.error(f"**Prediction:** {prediction} (Incorrect)")
+
+                    st.write("---")
+                    st.write("**Certainty Scores:**")
+                    certainty_df = pd.DataFrame(
+                        list(result["all_certainties"].items()),
+                        columns=["Lesion Type", "Certainty"],
+                    ).sort_values(by="Certainty", ascending=False)
+
+                    st.dataframe(
+                        certainty_df.style.format({"Certainty": "{:.2%}"}),
+                        use_container_width=True,
+                    )
+                    st.bar_chart(certainty_df.set_index("Lesion Type"))
+
                 
-                    with st.spinner("Sending to API for analysis..."):
-                        result = get_prediction(image_bytes)
-
-                    with col2:
-                        if result:
-                            prediction = result["prediction"]
-                            if prediction == ground_truth:
-                                st.success(f"**Prediction:** {prediction} (Correct)")
-                            else:
-                                st.error(f"**Prediction:** {prediction} (Incorrect)")
-
-                            st.write("---")
-                            st.write("**Certainty Scores:**")
-                            certainty_df = pd.DataFrame(
-                                list(result["all_certainties"].items()),
-                                columns=["Lesion Type", "Certainty"],
-                            ).sort_values(by="Certainty", ascending=False)
-
-                            st.dataframe(
-                                certainty_df.style.format({"Certainty": "{:.2%}"}),
-                                use_container_width=True,
-                            )
-                            st.bar_chart(certainty_df.set_index("Lesion Type"))
-
-                except requests.exceptions.RequestException as e:
-                    st.error(f"Could not fetch image from API: {e}")

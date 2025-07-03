@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from PIL import Image
 from google.cloud import storage
 
@@ -33,6 +34,9 @@ class_names_full = {
     "vasc": "Vascular Lesions",
 }
 
+class ImageUrlPayload(BaseModel):
+    image_url: str
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -49,31 +53,26 @@ async def lifespan(app: FastAPI):
         print(f"Step 1: Downloading resources from GCS bucket: {GCS_BUCKET_NAME}")
         storage_client = storage.Client()
         bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        app.state.bucket = bucket
 
-        # Download files from GCS to a temporary location inside the container
-        def download_blob(source_blob_name, destination_file_name):
+        def download_blob_to_memory(source_blob_name):
             blob = bucket.blob(source_blob_name)
-            blob.download_to_filename(destination_file_name)
-            print(f"Downloaded {source_blob_name} to {destination_file_name}")
+            return blob.download_as_bytes()
 
-        os.makedirs("/tmp/data/", exist_ok=True)
-        download_blob(METADATA_CSV_FILENAME, f"/tmp/data/{METADATA_CSV_FILENAME}")
-        download_blob(IMAGE_MANIFEST_FILENAME, f"/tmp/data/{IMAGE_MANIFEST_FILENAME}")
-        download_blob(TEST_SET_CSV_FILENAME, f"/tmp/data/{TEST_SET_CSV_FILENAME}")
-        download_blob(MODEL_FILENAME, "/tmp/data/model.pth")
+        metadata_bytes = download_blob_to_memory(METADATA_CSV_FILENAME)
+        df_metadata = pd.read_csv(io.BytesIO(metadata_bytes))
         
-        print("Step 2: Loading resources from downloaded files...")
-        df_metadata = pd.read_csv(f"/tmp/data/{METADATA_CSV_FILENAME}")
-        manifest_df = pd.read_csv(f"/tmp/data/{IMAGE_MANIFEST_FILENAME}").set_index('image_id')
-        app.state.manifest = manifest_df
-        app.state.test_set_df = pd.read_csv(f"/tmp/data/{TEST_SET_CSV_FILENAME}")
+        manifest_bytes = download_blob_to_memory(IMAGE_MANIFEST_FILENAME)
+        app.state.manifest = pd.read_csv(io.BytesIO(manifest_bytes)).set_index('image_id')
+
+        test_set_bytes = download_blob_to_memory(TEST_SET_CSV_FILENAME)
+        app.state.test_set_df = pd.read_csv(io.BytesIO(test_set_bytes))
         
-        # _, _, class_names = get_loss_class_weights(f"/tmp/data/{METADATA_CSV_FILENAME}")
-        # app.state.class_names = class_names
         class_names = sorted(df_metadata['dx'].unique())
         app.state.class_names = class_names
-        print("Class names loaded successfully.")
-        
+        print("Data files and class names loaded successfully.")
+
+        model_bytes = download_blob_to_memory(MODEL_FILENAME)        
         new_head = nn.Sequential(
             nn.Linear(2048, 512),
             nn.ReLU(),
@@ -81,7 +80,7 @@ async def lifespan(app: FastAPI):
             nn.Linear(512, len(app.state.class_names)),
         )
         model = get_model(name="resnet50", new_head=new_head)
-        model.load_state_dict(torch.load("/tmp/data/model.pth", map_location=device))
+        model.load_state_dict(torch.load(io.BytesIO(model_bytes), map_location=device))
         print("Successfuly loaded model from artifact")
         model.to(device)
         model.eval()
@@ -179,6 +178,45 @@ async def predict(request: Request, file: UploadFile = File(...)):
         }
     )
 
+@app.post("/predict-from-url", summary="Classify a skin lesion image from a GCS URL")
+async def predict_from_url(request: Request, payload: ImageUrlPayload):
+    if not request.app.state.is_ready:
+        raise HTTPException(status_code=503, detail="Server resources not available.")
+    model = request.app.state.model
+    class_names = request.app.state.class_names
+    if not model or not class_names:
+        raise HTTPException(
+            status_code=503,
+            detail="Model or class names not available. Check server logs.",
+        )
+    try:
+        print(f"Received request to predict from URL: {payload.image_url}")
+        if not payload.image_url.startswith(f"https://storage.googleapis.com/{GCS_BUCKET_NAME}/"):
+            raise HTTPException(status_code=400, detail="Invalid GCS URL format.")
+        
+        blob_name = payload.image_url.replace(f"https://storage.googleapis.com/{GCS_BUCKET_NAME}/", "")
+        
+        blob = request.app.state.bucket.blob(blob_name)
+        image_bytes = blob.download_as_bytes()
+        image_tensor = transform_image(image_bytes)
+        probabilities, predicted_index = get_prediction(model, image_tensor)
+        
+        predicted_class_abbrev = class_names[predicted_index]
+        predicted_class_full_name = class_names_full[predicted_class_abbrev]
+
+        certainty_scores = {
+        class_names_full[class_names[i]]: prob.item()
+        for i, prob in enumerate(probabilities)
+    }
+        
+        return JSONResponse(content={
+            "prediction": predicted_class_full_name,
+            "certainty": certainty_scores[predicted_class_full_name],
+            "all_certainties": certainty_scores,
+        })
+    except Exception as e:
+        print(f"Error predicting from URL: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process image from URL.")
 
 @app.get("/test-images", summary="Get list of test images and labels")
 async def get_test_images(request: Request):
