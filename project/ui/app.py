@@ -95,23 +95,18 @@ else:
             selected_id = selected_option.split(" ")[0]
             selected_row = df[df["image_id"] == selected_id].iloc[0]
 
-            image_url = f"{API_URL}{selected_row['image_url']}"
+            image_url = selected_row['image_url']
 
             col1, col2 = st.columns(2)
             with col1:
+                st.image(image_url, caption=f"Test Image: {selected_id}", use_column_width=True)
+                ground_truth = selected_row['dx_full']
+                st.info(f"**Ground Truth:** {ground_truth}")
                 try:
                     image_response = requests.get(image_url)
                     image_response.raise_for_status()
                     image_bytes = image_response.content
-                    st.image(
-                        image_bytes,
-                        caption=f"Test Image: {selected_id}",
-                        use_container_width=True,
-                    )
-
-                    ground_truth = selected_row["dx_full"]
-                    st.info(f"**Ground Truth:** {ground_truth}")
-
+                
                     with st.spinner("Sending to API for analysis..."):
                         result = get_prediction(image_bytes)
 
