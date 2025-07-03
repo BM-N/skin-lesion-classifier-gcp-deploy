@@ -15,4 +15,4 @@ COPY ./project/pyproject.toml /app/pyproject.toml
 # install the project in editable mode
 RUN pip install -e /app/project
 
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "2", "-b", "0.0.0.0:8000", "project.api.main:app"]
+CMD ["uvicorn", "project.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
