@@ -1,14 +1,16 @@
 import io
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from google.cloud import storage
-from PIL import Image
+from PIL import Image, ImageStat
 from pydantic import BaseModel
 
 from models.model import get_model
@@ -21,6 +23,7 @@ IMAGE_MANIFEST_FILENAME = "image_manifest.csv"
 MODEL_FILENAME = "model.pth"
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 EMBEDDING_CENTER_FILENAME = "embedding_center.pt"
+PREDICTIONS_LOG_FILENAME = "predictions_log.csv"
 OOD_THRESHOLD = 0.6
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -38,6 +41,7 @@ class_names_full = {
 
 class ImageUrlPayload(BaseModel):
     image_url: str
+    true_class: str | None = None
 
 
 class FeatureExtractor(nn.Module):
@@ -135,13 +139,51 @@ app = FastAPI(
 preprocess = get_transforms(train=False)
 
 
-def transform_image(image_bytes: bytes) -> torch.Tensor:
+def log_prediction_to_gcs(request: Request, log_entry: dict):
+    """
+    Appends a new prediction log entry to the predictions_log.csv in GCS.
+    """
+    try:
+        bucket = request.app.state.bucket
+        blob = bucket.blob(PREDICTIONS_LOG_FILENAME)
+
+        try:
+            existing_log_bytes = blob.download_as_bytes()
+            df = pd.read_csv(io.BytesIO(existing_log_bytes))
+        except Exception:
+            df = pd.DataFrame()
+
+        new_entry_df = pd.DataFrame([log_entry])
+        df = pd.concat([df, new_entry_df], ignore_index=True)
+
+        output_csv = df.to_csv(index=False)
+        blob.upload_from_string(output_csv, "text/csv")
+        print("Successfully logged prediction.")
+
+    except Exception as e:
+        print(f"ERROR: Failed to log prediction to GCS. {e}")
+
+
+def transform_image(image_bytes: bytes, true_class: str | None = None) -> torch.Tensor:
     """
     Takes image bytes, applies the project's validation transforms, and returns a tensor.
     """
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        return preprocess(image).unsqueeze(0)  # type: ignore
+        tensor = preprocess(image).unsqueeze(0).to(device)
+
+        image_stats = ImageStat.Stat(image)
+        avg_brightness = np.mean(image_stats.mean)
+        image_width, image_height = image.size
+
+        log_entry = {
+            "timestamp": datetime.now(datetime.timezone.utc).isoformat(),
+            "true_class": true_class,
+            "image_width": image_width,
+            "image_height": image_height,
+            "average_brightness": avg_brightness,
+        }
+        return tensor, log_entry
     except Exception as e:
         print(f"Error transforming image: {e}")
         raise HTTPException(
@@ -149,7 +191,7 @@ def transform_image(image_bytes: bytes) -> torch.Tensor:
         )
 
 
-def get_prediction(model: nn.Module, tensor: torch.Tensor, request: Request):
+def get_prediction(model: nn.Module, tensor: torch.Tensor, request: Request, log_entry):
     """
     Performs inference on the input tensor using the loaded model.
     """
@@ -157,24 +199,29 @@ def get_prediction(model: nn.Module, tensor: torch.Tensor, request: Request):
     feature_extractor = request.app.state.feature_extractor
     center_embedding = request.app.state.center_embedding
     tensor = tensor.to(device)
+
     with torch.no_grad():
         new_embedding = feature_extractor(tensor)
         cos_sim = nn.functional.cosine_similarity(
             new_embedding, center_embedding.unsqueeze(0)
         )
         distance = 1 - cos_sim.item()
+        log_entry["ood_distance_score"] = distance
+
         if distance > OOD_THRESHOLD:
+            log_entry["predicted_class"] = "Out-of-Distribution"
+            log_entry["confidence_score"] = None
+            log_prediction_to_gcs(request, log_entry)
             return {
                 "prediction": "Out-of-Distribution",
                 "error": "The uploaded image does not appear to be a skin lesion.",
-                "ood_distance_score": distance,
-                "confidence_score": None,
-                "all_certainties": {},
             }
         outputs = model(tensor)
         probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
         predicted_index = torch.argmax(probabilities).item()
-    return probabilities, predicted_index
+        confidence = probabilities[predicted_index].item()
+
+    return probabilities, predicted_index, confidence, distance
 
 
 # API endpoints
@@ -206,8 +253,10 @@ async def predict(request: Request, file: UploadFile = File(...)):
         )
 
     image_bytes = await file.read()
-    image_tensor = transform_image(image_bytes)
-    probabilities, predicted_index = get_prediction(model, image_tensor)
+    image_tensor, log_entry = transform_image(image_bytes)
+    probabilities, predicted_index, confidence, distance = get_prediction(
+        model, image_tensor, log_entry
+    )
 
     predicted_class_abbrev = class_names[predicted_index]
     predicted_class_full_name = class_names_full[predicted_class_abbrev]
@@ -217,11 +266,18 @@ async def predict(request: Request, file: UploadFile = File(...)):
         for i, prob in enumerate(probabilities)
     }
 
+    log_entry["predicted_class"] = predicted_class_full_name
+    log_entry["confidence_score"] = confidence
+
+    log_prediction_to_gcs(request, log_entry)
+
     return JSONResponse(
         content={
             "prediction": predicted_class_full_name,
-            "certainty": certainty_scores[predicted_class_full_name],
+            "certainty": confidence,
             "all_certainties": certainty_scores,
+            "ood_distance_score": distance,
+            "error": None,
         }
     )
 
@@ -302,3 +358,22 @@ async def get_test_images(request: Request):
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+
+
+@app.get("/monitoring-data", summary="Get prediction log data for the dashboard")
+async def get_monitoring_data(request: Request):
+    if not request.app.state.is_ready:
+        raise HTTPException(status_code=503, detail="Server resources not available.")
+    try:
+        bucket = request.app.state.bucket
+        blob = bucket.blob(PREDICTIONS_LOG_FILENAME)
+        if not blob.exists():
+            return JSONResponse(content=[])
+
+        log_bytes = blob.download_as_bytes()
+        df = pd.read_csv(io.BytesIO(log_bytes))
+        return JSONResponse(content=df.to_dict(orient="records"))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve monitoring data: {e}"
+        )

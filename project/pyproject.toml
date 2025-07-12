@@ -26,6 +26,8 @@ api = [
 ui = [
     "streamlit>=1.45.1",
     "requests>=2.32.3",
+    "plotly>=6.2.0",
+    "scikit-learn>=1.7.0",
 ]
 
 dev = [
