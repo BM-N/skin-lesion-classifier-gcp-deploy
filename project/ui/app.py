@@ -33,7 +33,8 @@ def get_test_image_data():
 
 
 def get_prediction_from_upload(image_bytes):
-    if not API_URL: return None
+    if not API_URL:
+        return None
     try:
         predict_url = f"{API_URL}/predict"
         files = {"file": ("image.jpg", image_bytes, "image/jpeg")}
@@ -44,8 +45,10 @@ def get_prediction_from_upload(image_bytes):
         st.error(f"Prediction failed. Could not connect to the API: {e}")
         return None
 
+
 def get_prediction_from_url(image_url: str):
-    if not API_URL: return None
+    if not API_URL:
+        return None
     try:
         predict_url = f"{API_URL}/predict-from-url"
         payload = {"image_url": image_url}
@@ -55,6 +58,7 @@ def get_prediction_from_url(image_url: str):
     except requests.exceptions.RequestException as e:
         st.error(f"Prediction failed: {e}")
         return None
+
 
 # layout
 st.sidebar.title("Options")
@@ -70,7 +74,7 @@ if app_mode == "Upload your own image":
         image_bytes = uploaded_file.getvalue()
         col1, col2 = st.columns(2)
         with col1:
-            st.image(image_bytes, caption="Uploaded Image", use_column_width=True)
+            st.image(image_bytes, caption="Uploaded Image", use_container_witdh=True)
 
         with st.spinner("Sending to API for analysis..."):
             result = get_prediction_from_upload(image_bytes)
@@ -110,12 +114,16 @@ else:
             selected_id = selected_option.split(" ")[0]
             selected_row = df[df["image_id"] == selected_id].iloc[0]
 
-            image_url = selected_row['image_url']
+            image_url = selected_row["image_url"]
 
             col1, col2 = st.columns(2)
             with col1:
-                st.image(image_url, caption=f"Test Image: {selected_id}", use_column_width=True)
-                ground_truth = selected_row['dx_full']
+                st.image(
+                    image_url,
+                    caption=f"Test Image: {selected_id}",
+                    use_container_width=True,
+                )
+                ground_truth = selected_row["dx_full"]
                 st.info(f"**Ground Truth:** {ground_truth}")
 
             with st.spinner("Analyzing the image..."):
@@ -140,5 +148,3 @@ else:
                         use_container_width=True,
                     )
                     st.bar_chart(certainty_df.set_index("Lesion Type"))
-
-                
