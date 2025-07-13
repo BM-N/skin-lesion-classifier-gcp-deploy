@@ -220,9 +220,26 @@ def get_prediction(model: nn.Module, tensor: torch.Tensor, request: Request, log
         probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
         predicted_index = torch.argmax(probabilities).item()
         confidence = probabilities[predicted_index].item()
-
-    return probabilities, predicted_index, confidence, distance
-
+    
+    predicted_class_abbrev = app.state.class_names[predicted_index]
+    predicted_class_full_name = class_names_full[predicted_class_abbrev]
+    
+    certainty_scores = {
+        class_names_full[app.state.class_names[i]]: prob.item() for i, prob in enumerate(probabilities)
+    }
+    
+    log_entry["predicted_class"] = predicted_class_full_name
+    log_entry["confidence_score"] = confidence
+    
+    log_prediction_to_gcs(request, log_entry)
+    
+    return {
+        "prediction": predicted_class_full_name,
+        "certainty": confidence,
+        "all_certainties": certainty_scores,
+        "ood_distance_score": distance,
+        "error": None
+    }
 
 # API endpoints
 @app.get("/", summary="Health Check")
@@ -245,41 +262,11 @@ async def predict(request: Request, file: UploadFile = File(...)):
             status_code=503, detail="Service not ready. Check startup logs."
         )
     model = request.app.state.model
-    class_names = request.app.state.class_names
-    if not model or not class_names:
-        raise HTTPException(
-            status_code=503,
-            detail="Model or class names not available. Check server logs.",
-        )
-
     image_bytes = await file.read()
-    image_tensor, log_entry = transform_image(image_bytes)
-    probabilities, predicted_index, confidence, distance = get_prediction(
-        model, image_tensor, log_entry
-    )
+    tensor, log = transform_image(image_bytes, true_class=None)
+    result = get_prediction(tensor, model, request, log)
+    return JSONResponse(content=result)
 
-    predicted_class_abbrev = class_names[predicted_index]
-    predicted_class_full_name = class_names_full[predicted_class_abbrev]
-
-    certainty_scores = {
-        class_names_full[class_names[i]]: prob.item()
-        for i, prob in enumerate(probabilities)
-    }
-
-    log_entry["predicted_class"] = predicted_class_full_name
-    log_entry["confidence_score"] = confidence
-
-    log_prediction_to_gcs(request, log_entry)
-
-    return JSONResponse(
-        content={
-            "prediction": predicted_class_full_name,
-            "certainty": confidence,
-            "all_certainties": certainty_scores,
-            "ood_distance_score": distance,
-            "error": None,
-        }
-    )
 
 
 @app.post("/predict-from-url", summary="Classify a skin lesion image from a GCS URL")
@@ -306,24 +293,9 @@ async def predict_from_url(request: Request, payload: ImageUrlPayload):
 
         blob = request.app.state.bucket.blob(blob_name)
         image_bytes = blob.download_as_bytes()
-        image_tensor = transform_image(image_bytes)
-        probabilities, predicted_index = get_prediction(model, image_tensor)
-
-        predicted_class_abbrev = class_names[predicted_index]
-        predicted_class_full_name = class_names_full[predicted_class_abbrev]
-
-        certainty_scores = {
-            class_names_full[class_names[i]]: prob.item()
-            for i, prob in enumerate(probabilities)
-        }
-
-        return JSONResponse(
-            content={
-                "prediction": predicted_class_full_name,
-                "certainty": certainty_scores[predicted_class_full_name],
-                "all_certainties": certainty_scores,
-            }
-        )
+        tensor, log = transform_image(image_bytes, true_class=payload.true_class)
+        result = get_prediction(tensor, model, request, log)
+        return JSONResponse(content=result)
     except Exception as e:
         print(f"Error predicting from URL: {e}")
         raise HTTPException(status_code=500, detail="Failed to process image from URL.")

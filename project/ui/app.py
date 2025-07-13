@@ -69,12 +69,12 @@ def get_prediction_from_upload(image_bytes):
         return None
 
 
-def get_prediction_from_url(image_url: str):
+def get_prediction_from_url(image_url: str, true_class: str | None):
     if not API_URL:
         return None
     try:
         predict_url = f"{API_URL}/predict-from-url"
-        payload = {"image_url": image_url}
+        payload = {"image_url": image_url, "true_class": true_class}
         response = requests.post(predict_url, json=payload)
         response.raise_for_status()
         return response.json()
@@ -231,7 +231,7 @@ else:
                     st.info(f"**Ground Truth:** {ground_truth}")
 
                 with st.spinner("Analyzing the image..."):
-                    result = get_prediction_from_url(image_url)
+                    result = get_prediction_from_url(image_url, ground_truth)
                 with col2:
                     display_prediction_and_update_log(result, ground_truth)
 st.divider()
