@@ -191,13 +191,14 @@ def transform_image(image_bytes: bytes, true_class: str | None = None) -> torch.
         )
 
 
-def get_prediction(model: nn.Module, tensor: torch.Tensor, request: Request, log_entry):
+def get_prediction(request: Request, tensor: torch.Tensor, log_entry: dict):
     """
     Performs inference on the input tensor using the loaded model.
     """
     model = request.app.state.model
     feature_extractor = request.app.state.feature_extractor
     center_embedding = request.app.state.center_embedding
+    class_names = request.app.state.class_names 
     tensor = tensor.to(device)
 
     with torch.no_grad():
@@ -225,7 +226,7 @@ def get_prediction(model: nn.Module, tensor: torch.Tensor, request: Request, log
     predicted_class_full_name = class_names_full[predicted_class_abbrev]
     
     certainty_scores = {
-        class_names_full[app.state.class_names[i]]: prob.item() for i, prob in enumerate(probabilities)
+        class_names_full[class_names[i]]: prob.item() for i, prob in enumerate(probabilities)
     }
     
     log_entry["predicted_class"] = predicted_class_full_name
@@ -261,25 +262,18 @@ async def predict(request: Request, file: UploadFile = File(...)):
         raise HTTPException(
             status_code=503, detail="Service not ready. Check startup logs."
         )
-    model = request.app.state.model
     image_bytes = await file.read()
     tensor, log = transform_image(image_bytes, true_class=None)
-    result = get_prediction(tensor, model, request, log)
+    log["true_class"] = None
+    result = get_prediction(request, tensor, log)
     return JSONResponse(content=result)
-
 
 
 @app.post("/predict-from-url", summary="Classify a skin lesion image from a GCS URL")
 async def predict_from_url(request: Request, payload: ImageUrlPayload):
     if not request.app.state.is_ready:
         raise HTTPException(status_code=503, detail="Server resources not available.")
-    model = request.app.state.model
-    class_names = request.app.state.class_names
-    if not model or not class_names:
-        raise HTTPException(
-            status_code=503,
-            detail="Model or class names not available. Check server logs.",
-        )
+    
     try:
         print(f"Received request to predict from URL: {payload.image_url}")
         if not payload.image_url.startswith(
@@ -294,7 +288,7 @@ async def predict_from_url(request: Request, payload: ImageUrlPayload):
         blob = request.app.state.bucket.blob(blob_name)
         image_bytes = blob.download_as_bytes()
         tensor, log = transform_image(image_bytes, true_class=payload.true_class)
-        result = get_prediction(tensor, model, request, log)
+        result = get_prediction(request, tensor, log)
         return JSONResponse(content=result)
     except Exception as e:
         print(f"Error predicting from URL: {e}")

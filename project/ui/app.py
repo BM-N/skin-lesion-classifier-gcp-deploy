@@ -23,7 +23,7 @@ st.write(
 )
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_monitoring_data():
     """Fetches the full prediction log from the API."""
     if not API_URL:
