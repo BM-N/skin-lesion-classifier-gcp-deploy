@@ -23,7 +23,7 @@ st.write(
 )
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=120)
 def get_monitoring_data():
     """Fetches the full prediction log from the API."""
     if not API_URL:
@@ -116,10 +116,6 @@ def display_prediction_and_update_log(result, ground_truth=None):
         )
         st.bar_chart(certainty_df.set_index("Lesion Type"))
 
-    st.info("Updating monitoring dashboard...")
-    st.cache_data.clear()
-    st.rerun()
-
 
 def render_monitoring_dashboard(log_df):
     """Takes a dataframe of logs and displays the monitoring charts."""
@@ -168,18 +164,20 @@ def render_monitoring_dashboard(log_df):
 
 
 # layout
-st.sidebar.title("Options")
-app_mode = st.sidebar.selectbox(
+st.header("🔎 Inference Engine")
+inference_mode = st.selectbox(
     "Choose an option",
     ["Try an image from the test set", "Upload your own image"],
-    key="app_mode",
+    key="inference_mode",
     index=None,
     placeholder="Select an inference mode...",
 )
 
 prediction_result_placeholder = st.empty()
+result = None
 
-if app_mode == "Upload your own image":
+
+if inference_mode == "Upload your own image":
     st.header("Classify a new image")
     uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
@@ -235,6 +233,9 @@ else:
                 with col2:
                     display_prediction_and_update_log(result, ground_truth)
 st.divider()
+
+if result:
+    st.cache_data.clear()
 
 if "log_df" not in st.session_state or st.session_state.log_df.empty:
     st.session_state.log_df = get_monitoring_data()
