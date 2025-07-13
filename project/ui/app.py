@@ -236,8 +236,9 @@ st.divider()
 
 if result:
     st.cache_data.clear()
-
-if "log_df" not in st.session_state or st.session_state.log_df.empty:
     st.session_state.log_df = get_monitoring_data()
 
-render_monitoring_dashboard(st.session_state.log_df)
+elif "log_df" not in st.session_state or st.session_state.log_df.empty:
+    st.session_state.log_df = get_monitoring_data()
+
+render_monitoring_dashboard(st.session_state.get("log_df", pd.DataFrame()))
