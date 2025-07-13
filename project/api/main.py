@@ -1,7 +1,7 @@
 import io
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -177,7 +177,7 @@ def transform_image(image_bytes: bytes, true_class: str | None = None) -> torch.
         image_width, image_height = image.size
 
         log_entry = {
-            "timestamp": datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "true_class": true_class,
             "image_width": image_width,
             "image_height": image_height,
