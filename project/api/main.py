@@ -13,6 +13,7 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from google.api_core.exceptions import PreconditionFailed
 from google.cloud import storage
+from google.cloud.exceptions import NotFound
 from PIL import Image, ImageStat
 from pydantic import BaseModel
 
@@ -150,33 +151,45 @@ def log_prediction_to_gcs(request: Request, log_entry: dict):
     blob = bucket.blob(PREDICTIONS_LOG_FILENAME)
 
     for attempt in range(5):
+        generation_match = 0
+        df = pd.DataFrame()
+        
         try:
-
             blob.reload()
             generation_match = blob.generation
-            existing_log_bytes = blob.download_as_bytes()
-            df = pd.read_csv(io.BytesIO(existing_log_bytes))
-        except Exception:
-            
-            generation_match = 0
-            df = pd.DataFrame()
+            log_bytes = blob.download_as_bytes()
+            if log_bytes:
+                df = pd.read_csv(io.BytesIO(log_bytes))
 
+        except NotFound:
+            print("Log file not found. Creating a new one.")
+        
+        except Exception as e:
+            print(f"Warning: Could not read or parse log file: {e}. Overwriting.")
+
+        try:
             new_entry_df = pd.DataFrame([log_entry])
             df = pd.concat([df, new_entry_df], ignore_index=True)
 
+            
             output_csv = df.to_csv(index=False)
-            blob.upload_from_string(output_csv, "text/csv", if_generation_match=generation_match)
-            print("Successfully logged prediction.")
+            blob.upload_from_string(
+                output_csv,
+                "text/csv",
+                if_generation_match=generation_match
+            )
+            print(f"Successfully logged prediction. Log file now contains {len(df)} entries.")
             return
-        
+
         except PreconditionFailed:
             print(f"Race condition detected on attempt {attempt + 1}. Retrying...")
             time.sleep(random.uniform(0.2, 0.5))
         
-
         except Exception as e:
-            print(f"ERROR: Failed to log prediction to GCS. {e}")
+            print(f"ERROR: Failed to upload log prediction to GCS. {e}")
+            return
 
+    print("ERROR: Failed to log prediction after multiple retries.")
 
 def transform_image(image_bytes: bytes, true_class: str | None = None) -> torch.Tensor:
     """
