@@ -24,7 +24,7 @@ MODEL_FILENAME = "model.pth"
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 EMBEDDING_CENTER_FILENAME = "embedding_center.pt"
 PREDICTIONS_LOG_FILENAME = "predictions_log.csv"
-OOD_THRESHOLD = 0.4
+OOD_THRESHOLD = 0.5
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
